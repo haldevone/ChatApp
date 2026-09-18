@@ -1,0 +1,310 @@
+﻿@{
+    ViewData["Title"] = "Chat Page";
+}
+
+@{
+    ViewData["Title"] = "Chat";
+}
+
+<div class="chat-wrapper">
+    <div class="chat-container">
+        <div class="chat-header">
+            <h4>ChatApp</h4>
+            <span id="connectionStatus" class="status-badge status-disconnected">Frånkopplad</span>
+        </div>
+
+        <div class="group-panel">
+            <input id="groupNameInput" type="text" placeholder="Gruppnamn (t.ex. allmänt)" maxlength="50" />
+            <button id="joinGroupBtn" class="btn-primary">Anslut</button>
+            <span id="currentGroupLabel" class="current-group"></span>
+        </div>
+
+        <div id="messagesBox" class="messages-box">
+            <div class="empty-state">Anslut till en grupp för att börja chatta</div>
+        </div>
+
+        <div class="members-panel" id="membersPanel" style="display:none;">
+            <span class="members-label">I gruppen:</span>
+            <span id="membersList"></span>
+        </div>
+
+        <div class="message-input-panel">
+            <input id="messageInput" type="text" placeholder="Skriv ett meddelande..." maxlength="500" disabled />
+            <button id="sendBtn" class="btn-primary" disabled>Skicka</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .chat-wrapper {
+        display: flex;
+        justify-content: center;
+        padding: 2rem 1rem;
+    }
+
+    .chat-container {
+        width: 100%;
+        max-width: 640px;
+        border: 1px solid #d8dde3;
+        border-radius: 10px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
+
+    .chat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.9rem 1.2rem;
+        background: #1f2933;
+        color: #fff;
+    }
+
+        .chat-header h4 {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+
+    .status-badge {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        font-weight: 600;
+    }
+
+    .status-connected {
+        background: #1f9d55;
+        color: #fff;
+    }
+
+    .status-disconnected {
+        background: #c0392b;
+        color: #fff;
+    }
+
+    .group-panel {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.8rem 1.2rem;
+        border-bottom: 1px solid #eceff1;
+        align-items: center;
+    }
+
+        .group-panel input {
+            flex: 1;
+            padding: 0.5rem 0.7rem;
+            border: 1px solid #d8dde3;
+            border-radius: 6px;
+        }
+
+    .current-group {
+        font-size: 0.8rem;
+        color: #5a6472;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+        .btn-primary:disabled {
+            background: #a9b4c0;
+            cursor: not-allowed;
+        }
+
+    .messages-box {
+        height: 380px;
+        overflow-y: auto;
+        padding: 1rem 1.2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        background: #f7f8fa;
+    }
+
+    .empty-state {
+        margin: auto;
+        color: #9aa4b1;
+        font-size: 0.9rem;
+    }
+
+    .message {
+        max-width: 75%;
+        padding: 0.5rem 0.8rem;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid #e4e7eb;
+        font-size: 0.9rem;
+    }
+
+        .message.own {
+            align-self: flex-end;
+            background: #dbe9ff;
+            border-color: #bcd5fb;
+        }
+
+        .message.system {
+            align-self: center;
+            background: transparent;
+            border: none;
+            color: #9aa4b1;
+            font-size: 0.78rem;
+            font-style: italic;
+        }
+
+    .message-sender {
+        font-weight: 700;
+        font-size: 0.78rem;
+        color: #2563eb;
+        margin-bottom: 0.15rem;
+    }
+
+    .message-time {
+        font-size: 0.68rem;
+        color: #9aa4b1;
+        margin-top: 0.2rem;
+    }
+
+    .members-panel {
+        padding: 0.4rem 1.2rem;
+        font-size: 0.78rem;
+        color: #5a6472;
+        border-bottom: 1px solid #eceff1;
+    }
+
+    .members-label {
+        font-weight: 600;
+        margin-right: 0.3rem;
+    }
+
+    .message-input-panel {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.9rem 1.2rem;
+    }
+
+        .message-input-panel input {
+            flex: 1;
+            padding: 0.55rem 0.8rem;
+            border: 1px solid #d8dde3;
+            border-radius: 6px;
+        }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+<script>
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/chatHub")
+        .withAutomaticReconnect()
+        .build();
+
+    let currentGroup = null;
+
+    const statusBadge = document.getElementById("connectionStatus");
+    const messagesBox = document.getElementById("messagesBox");
+    const groupInput = document.getElementById("groupNameInput");
+    const joinBtn = document.getElementById("joinGroupBtn");
+    const currentGroupLabel = document.getElementById("currentGroupLabel");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const membersPanel = document.getElementById("membersPanel");
+    const membersList = document.getElementById("membersList");
+
+    function setConnectedUi(isConnected) {
+        statusBadge.textContent = isConnected ? "Ansluten" : "Frånkopplad";
+        statusBadge.className = "status-badge " + (isConnected ? "status-connected" : "status-disconnected");
+    }
+
+    function addMessage({ sender, text, isOwn, isSystem }) {
+        // Rensa "tomt läge"-texten första gången ett meddelande kommer
+        const empty = messagesBox.querySelector(".empty-state");
+        if (empty) empty.remove();
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "message" + (isOwn ? " own" : "") + (isSystem ? " system" : "");
+
+        if (!isSystem) {
+            const senderEl = document.createElement("div");
+            senderEl.className = "message-sender";
+            senderEl.textContent = sender; // textContent = ingen HTML tolkas, skyddar mot XSS
+            wrapper.appendChild(senderEl);
+        }
+
+        const textEl = document.createElement("div");
+        textEl.textContent = text; // samma sak här, kritiskt
+        wrapper.appendChild(textEl);
+
+        if (!isSystem) {
+            const timeEl = document.createElement("div");
+            timeEl.className = "message-time";
+            timeEl.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            wrapper.appendChild(timeEl);
+        }
+
+        messagesBox.appendChild(wrapper);
+        messagesBox.scrollTop = messagesBox.scrollHeight;
+    }
+
+    // Tas emot från servern när ett gruppmeddelande skickas
+    connection.on("ReceiveMessage", (sender, text) => {
+        addMessage({ sender, text, isOwn: sender === "@User.Identity?.Name" });
+    });
+
+    // Extra: visa när någon går med/lämnar gruppen
+    connection.on("UserJoined", (userName) => {
+        addMessage({ text: `${userName} anslöt till gruppen`, isSystem: true });
+    });
+
+    connection.on("UserLeft", (userName) => {
+        addMessage({ text: `${userName} lämnade gruppen`, isSystem: true });
+    });
+
+    joinBtn.addEventListener("click", async () => {
+        const groupName = groupInput.value.trim();
+        if (!groupName) return;
+
+        if (currentGroup) {
+            await connection.invoke("LeaveGroup", currentGroup);
+        }
+
+        await connection.invoke("JoinGroup", groupName);
+        currentGroup = groupName;
+        currentGroupLabel.textContent = `Grupp: ${groupName}`;
+        messageInput.disabled = false;
+        sendBtn.disabled = false;
+        groupInput.value = "";
+    });
+
+    sendBtn.addEventListener("click", sendMessage);
+    messageInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendMessage();
+    });
+
+    async function sendMessage() {
+        const text = messageInput.value.trim();
+        if (!text || !currentGroup) return;
+
+        await connection.invoke("SendMessageToGroup", currentGroup, text);
+        messageInput.value = "";
+    }
+
+    connection.start()
+        .then(() => setConnectedUi(true))
+        .catch(err => {
+            console.error("Kunde inte ansluta:", err);
+            setConnectedUi(false);
+        });
+
+    connection.onreconnecting(() => setConnectedUi(false));
+    connection.onreconnected(() => setConnectedUi(true));
+    connection.onclose(() => setConnectedUi(false));
+</script>
