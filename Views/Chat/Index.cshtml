@@ -23,6 +23,8 @@
             <div class="empty-state">Anslut till en grupp för att börja chatta</div>
         </div>
 
+        <div id="typingIndicator" class="typing-indicator"></div>
+
         <div class="members-panel" id="membersPanel" style="display:none;">
             <span class="members-label">I gruppen:</span>
             <span id="membersList"></span>
@@ -131,6 +133,14 @@
         background: #f7f8fa;
     }
 
+    .typing-indicator {
+        padding: 0 1.2rem;
+        height: 1.4rem;
+        font-size: 0.78rem;
+        color: #9aa4b1;
+        font-style: italic;
+    }
+
     .empty-state {
         margin: auto;
         color: #9aa4b1;
@@ -218,6 +228,16 @@
     const sendBtn = document.getElementById("sendBtn");
     const membersPanel = document.getElementById("membersPanel");
     const membersList = document.getElementById("membersList");
+    const typingIndicator = document.getElementById("typingIndicator");
+
+    let typingTimeout = null;
+
+    messageInput.addEventListener("input", () => {
+        if (!currentGroup) return;
+        connection.invoke("NotifyTyping", currentGroup).catch(err => console.error(err));
+    });
+
+    let hideTypingTimer = null;
 
     function setConnectedUi(isConnected) {
         statusBadge.textContent = isConnected ? "Ansluten" : "Frånkopplad";
@@ -254,12 +274,10 @@
         messagesBox.scrollTop = messagesBox.scrollHeight;
     }
 
-    // Tas emot från servern när ett gruppmeddelande skickas
     connection.on("ReceiveMessage", (sender, text) => {
         addMessage({ sender, text, isOwn: sender === "@User.Identity?.Name" });
     });
 
-    // Extra: visa när någon går med/lämnar gruppen
     connection.on("UserJoined", (userName) => {
         addMessage({ text: `${userName} anslöt till gruppen`, isSystem: true });
     });
@@ -268,8 +286,19 @@
         addMessage({ text: `${userName} lämnade gruppen`, isSystem: true });
     });
 
+	connection.on("UserTyping", (userName) => {
+		typingIndicator.textContent = `${userName} skriver...`;
+		clearTimeout(hideTypingTimer);
+        
+		hideTypingTimer = setTimeout(() => {
+			typingIndicator.textContent = "";
+		}, 2000);
+    });
+
     joinBtn.addEventListener("click", async () => {
+        
         const groupName = groupInput.value.trim();
+
         if (!groupName) return;
 
         if (currentGroup) {
