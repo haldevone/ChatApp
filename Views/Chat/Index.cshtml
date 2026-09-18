@@ -13,10 +13,14 @@
             <span id="connectionStatus" class="status-badge status-disconnected">Frånkopplad</span>
         </div>
 
-        <div class="group-panel">
+        <div id="groupPanel" class="group-panel">
             <input id="groupNameInput" type="text" placeholder="Gruppnamn (t.ex. allmänt)" maxlength="50" />
             <button id="joinGroupBtn" class="btn-primary">Anslut</button>
-            <span id="currentGroupLabel" class="current-group"></span>
+        </div>
+
+        <div class="active-group-box" id="activeGroupBox" style="display:none;">
+            <span class="active-group-name" id="activeGroupName"></span>
+            <button id="leaveGroupBtn" class="btn-leave">Lämna grupp</button>
         </div>
 
         <div id="messagesBox" class="messages-box">
@@ -65,10 +69,10 @@
         color: #fff;
     }
 
-        .chat-header h4 {
-            margin: 0;
-            font-size: 1.1rem;
-        }
+    .chat-header h4 {
+        margin: 0;
+        font-size: 1.1rem;
+    }
 
     .status-badge {
         font-size: 0.75rem;
@@ -90,22 +94,45 @@
     .group-panel {
         display: flex;
         gap: 0.5rem;
+		margin-top: 0.75rem;
         padding: 0.8rem 1.2rem;
         border-bottom: 1px solid #eceff1;
         align-items: center;
     }
 
-        .group-panel input {
-            flex: 1;
-            padding: 0.5rem 0.7rem;
-            border: 1px solid #d8dde3;
-            border-radius: 6px;
-        }
+    .group-panel input {
+        flex: 1;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid #d8dde3;
+        border-radius: 6px;
+    }
 
-    .current-group {
-        font-size: 0.8rem;
-        color: #5a6472;
-        white-space: nowrap;
+    .active-group-box {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 0.75rem 1.2rem;
+        padding: 0.55rem 0.9rem;
+        background: #e8f0fe;
+        border: 1px solid #bcd5fb;
+        border-radius: 8px;
+    }
+
+    .active-group-name {
+        font-weight: 400;
+        color: #1e3a8a;
+        font-size: 0.88rem;
+    }
+
+    .btn-leave {
+        background: #fff;
+        color: #c0392b;
+        border: 1px solid #f0b8b0;
+        padding: 0.3rem 0.7rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.78rem;
+        font-weight: 600;
     }
 
     .btn-primary {
@@ -118,10 +145,10 @@
         font-weight: 600;
     }
 
-        .btn-primary:disabled {
-            background: #a9b4c0;
-            cursor: not-allowed;
-        }
+    .btn-primary:disabled {
+        background: #a9b4c0;
+        cursor: not-allowed;
+    }
 
     .messages-box {
         height: 380px;
@@ -137,7 +164,7 @@
         padding: 0 1.2rem;
         height: 1.4rem;
         font-size: 0.78rem;
-        color: #9aa4b1;
+        color: #7f8996;
         font-style: italic;
     }
 
@@ -160,6 +187,7 @@
             align-self: flex-end;
             background: #dbe9ff;
             border-color: #bcd5fb;
+            color: #0B1220;
         }
 
         .message.system {
@@ -218,6 +246,11 @@
         .build();
 
     let currentGroup = null;
+
+    const groupPanel = document.getElementById("groupPanel");
+    const activeGroupBox = document.getElementById("activeGroupBox");
+    const activeGroupName = document.getElementById("activeGroupName");
+    const leaveGroupBtn = document.getElementById("leaveGroupBtn");
 
     const statusBadge = document.getElementById("connectionStatus");
     const messagesBox = document.getElementById("messagesBox");
@@ -295,22 +328,39 @@
 		}, 2000);
     });
 
-    joinBtn.addEventListener("click", async () => {
-        
+
+        joinBtn.addEventListener("click", async () => {
         const groupName = groupInput.value.trim();
-
         if (!groupName) return;
-
-        if (currentGroup) {
-            await connection.invoke("LeaveGroup", currentGroup);
-        }
 
         await connection.invoke("JoinGroup", groupName);
         currentGroup = groupName;
-        currentGroupLabel.textContent = `Grupp: ${groupName}`;
+
+        groupPanel.style.display = "none";
+        activeGroupBox.style.display = "flex";
+        activeGroupName.textContent = "Du är i gruppen: ";
+	    const boldName = document.createElement("span");
+		boldName.style.fontWeight = "700";
+        boldName.style.textTransform = "uppercase";
+	    boldName.textContent = groupName;
+		activeGroupName.appendChild(boldName);
+
         messageInput.disabled = false;
         sendBtn.disabled = false;
         groupInput.value = "";
+    });
+
+    leaveGroupBtn.addEventListener("click", async () => {
+        if (!currentGroup) return;
+
+        await connection.invoke("LeaveGroup", currentGroup);
+        currentGroup = null;
+
+        activeGroupBox.style.display = "none";
+        groupPanel.style.display = "flex";
+
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
     });
 
     sendBtn.addEventListener("click", sendMessage);
