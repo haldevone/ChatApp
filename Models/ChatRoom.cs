@@ -7,4 +7,5 @@ public class ChatRoom
     public string OwnerId { get; set; } = string.Empty;
 
     public ICollection<ChatRoomMember> Members { get; set; } = new List<ChatRoomMember>();
+    public ICollection<Message> Messages { get; set; } = new List<Message>();
 }

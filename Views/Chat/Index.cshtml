@@ -6,6 +6,29 @@
     ViewData["Title"] = "Chat";
 }
 
+@model List<ChatApp.Models.ChatRoom>
+
+<div class="rooms-panel">
+    <h5>Dina rum</h5>
+    <ul id="myRoomsList">
+        @foreach (var room in Model)
+        {
+            <li>@room.Name</li>
+        }
+    </ul>
+
+    <form id="createRoomForm">
+        <input id="newRoomName" type="text" placeholder="Nytt rumsnamn" maxlength="50" />
+        <button type="submit" class="btn-primary">Skapa rum</button>
+    </form>
+
+    <form id="addMemberForm">
+        <input id="addMemberRoomId" type="number" placeholder="Rum-ID" />
+        <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
+        <button type="submit" class="btn-primary">Lägg till medlem</button>
+    </form>
+</div>
+
 <div class="chat-wrapper">
     <div class="chat-container">
         <div class="chat-header">
@@ -332,26 +355,45 @@
         alert(`Du har inte behörighet till rummet "${groupName}".`);
     });
 
+    connection.on("LoadHistory", (messages) => {
+        messagesBox.innerHTML = "";
+        messages.forEach(m => {
+            addMessage({
+                sender: m.senderName,
+                text: m.text,
+                isOwn: m.senderName === "@User.Identity?.Name"
+            });
+        });
+    });
 
-        joinBtn.addEventListener("click", async () => {
-        const groupName = groupInput.value.trim();
-        if (!groupName) return;
-
-        await connection.invoke("JoinGroup", groupName);
+    connection.on("JoinApproved", (groupName) => {
         currentGroup = groupName;
-
         groupPanel.style.display = "none";
         activeGroupBox.style.display = "flex";
-        activeGroupName.textContent = "Du är i gruppen: ";
-	    const boldName = document.createElement("span");
-		boldName.style.fontWeight = "700";
+
+        activeGroupName.textContent = "Du är i grupp: ";
+        const boldName = document.createElement("span");
+        boldName.style.fontWeight = "700";
         boldName.style.textTransform = "uppercase";
-	    boldName.textContent = groupName;
-		activeGroupName.appendChild(boldName);
+        boldName.textContent = groupName;
+        activeGroupName.appendChild(boldName);
 
         messageInput.disabled = false;
         sendBtn.disabled = false;
         groupInput.value = "";
+    });
+
+    connection.on("JoinDenied", (groupName) => {
+        alert(`Du har inte behörighet till rummet "${groupName}".`);
+    });
+
+
+    joinBtn.addEventListener("click", async () => {
+
+        const groupName = groupInput.value.trim();
+        if (!groupName) return;
+
+        await connection.invoke("JoinGroup", groupName);
     });
 
     leaveGroupBtn.addEventListener("click", async () => {
@@ -368,6 +410,7 @@
     });
 
     sendBtn.addEventListener("click", sendMessage);
+    
     messageInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") sendMessage();
     });
@@ -379,6 +422,37 @@
         await connection.invoke("SendMessageToGroup", currentGroup, text);
         messageInput.value = "";
     }
+
+    document.getElementById("createRoomForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const roomName = document.getElementById("newRoomName").value.trim();
+        if (!roomName) return;
+
+        const response = await fetch("/Chat/CreateRoom", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `roomName=${encodeURIComponent(roomName)}`
+        });
+
+        if (response.ok) location.reload();
+        else alert("Kunde inte skapa rum.");
+    });
+
+    document.getElementById("addMemberForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const roomId = document.getElementById("addMemberRoomId").value;
+        const userName = document.getElementById("addMemberUserName").value.trim();
+        if (!roomId || !userName) return;
+
+        const response = await fetch("/Chat/AddMember", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `roomId=${roomId}&userName=${encodeURIComponent(userName)}`
+        });
+
+        if (response.ok) alert("Medlem tillagd!");
+        else alert("Kunde inte lägga till medlem (fel rum-ID eller inte ägare).");
+    });
 
     connection.start()
         .then(() => setConnectedUi(true))

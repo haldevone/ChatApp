@@ -24,9 +24,12 @@ public class ChatHub : Hub
     {
         var userId = _userManager.GetUserId(Context.User);
 
-        bool isMember = await _db.ChatRoomMembers
-            .Include(m => m.ChatRoom)
-            .AnyAsync(m => m.UserId == userId && m.ChatRoom.Name == groupName);
+        var room = await _db.ChatRooms
+            .FirstOrDefaultAsync(r => r.Name == groupName);
+
+        bool isMember = room != null && await _db.ChatRoomMembers
+            .AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+
 
         if (!isMember)
         {
@@ -35,6 +38,18 @@ public class ChatHub : Hub
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+        await Clients.Caller.SendAsync("JoinApproved", groupName);
+
+        var history = await _db.Messages
+            .Where(m => m.ChatRoomId == room.Id)
+            .OrderBy(m => m.SentAtUtc)
+            .TakeLast(50)
+            .Select(m => new { m.SenderName, m.Text, m.SentAtUtc })
+            .ToListAsync();
+
+        await Clients.Caller.SendAsync("LoadHistory", history);
+
         await Clients.OthersInGroup(groupName).SendAsync("UserJoined", Context.User?.Identity?.Name);
     }
 
@@ -49,7 +64,25 @@ public class ChatHub : Hub
         if(string.IsNullOrWhiteSpace(message) || message.Length > 500)
             return;
 
-        await Clients.Group(groupName).SendAsync("ReceiveMessage", Context.User?.Identity?.Name, message);
+        var userId = _userManager.GetUserId(Context.User)!;
+        var senderName = Context.User?.Identity?.Name ?? "Okänd";
+
+        var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name == groupName);
+        if (room == null) return;
+
+        bool isMember = await _db.ChatRoomMembers.AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+        if (!isMember) return;
+
+        _db.Messages.Add(new Message
+        {
+            ChatRoomId = room.Id,
+            SenderId = userId,
+            SenderName = senderName,
+            Text = message
+        });
+        await _db.SaveChangesAsync();
+
+        await Clients.Group(groupName).SendAsync("ReceiveMessage", senderName, message);
     }
 
     public async Task NotifyTyping(string groupName)
