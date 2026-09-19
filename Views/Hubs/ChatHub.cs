@@ -1,5 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using ChatApp.Data;
+using ChatApp.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
 
 namespace ChatApp.Views.Hubs;
@@ -8,12 +12,27 @@ namespace ChatApp.Views.Hubs;
 public class ChatHub : Hub
 {
     private static readonly ConcurrentDictionary<string, DateTime> _lastTypingCall = new();
+    private readonly ApplicationDbContext _db;
+    private readonly UserManager<ApplicationUser> _userManager;
 
+    public ChatHub(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
+    {
+        _db = db;
+        _userManager = userManager;
+    }
     public async Task JoinGroup(string groupName)
     {
-        groupName = groupName.Trim();
-        if (string.IsNullOrWhiteSpace(groupName) || groupName.Length > 50)
+        var userId = _userManager.GetUserId(Context.User);
+
+        bool isMember = await _db.ChatRoomMembers
+            .Include(m => m.ChatRoom)
+            .AnyAsync(m => m.UserId == userId && m.ChatRoom.Name == groupName);
+
+        if (!isMember)
+        {
+            await Clients.Caller.SendAsync("JoinDenied", groupName);
             return;
+        }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
         await Clients.OthersInGroup(groupName).SendAsync("UserJoined", Context.User?.Identity?.Name);

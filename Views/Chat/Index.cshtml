@@ -328,6 +328,10 @@
 		}, 2000);
     });
 
+    connection.on("JoinDenied", (groupName) => {
+        alert(`Du har inte behörighet till rummet "${groupName}".`);
+    });
+
 
         joinBtn.addEventListener("click", async () => {
         const groupName = groupInput.value.trim();
