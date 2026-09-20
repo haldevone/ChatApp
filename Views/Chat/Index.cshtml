@@ -7,6 +7,7 @@
 }
 
 @model List<ChatApp.Models.ChatRoom>
+@Html.AntiForgeryToken()
 
 <div class="rooms-panel">
     <h5>Dina rum</h5>
@@ -204,6 +205,7 @@
         background: #fff;
         border: 1px solid #e4e7eb;
         font-size: 0.9rem;
+        color: #1f2933;
     }
 
         .message.own {
@@ -263,6 +265,9 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
 <script>
+
+	const antiForgeryToken = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
     const connection = new signalR.HubConnectionBuilder()
         .withUrl("/chatHub")
         .withAutomaticReconnect()
@@ -300,9 +305,10 @@
         statusBadge.className = "status-badge " + (isConnected ? "status-connected" : "status-disconnected");
     }
 
-    function addMessage({ sender, text, isOwn, isSystem }) {
-        // Rensa "tomt läge"-texten första gången ett meddelande kommer
+    function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
+        
         const empty = messagesBox.querySelector(".empty-state");
+        
         if (empty) empty.remove();
 
         const wrapper = document.createElement("div");
@@ -311,18 +317,20 @@
         if (!isSystem) {
             const senderEl = document.createElement("div");
             senderEl.className = "message-sender";
-            senderEl.textContent = sender; // textContent = ingen HTML tolkas, skyddar mot XSS
+            senderEl.textContent = sender;
             wrapper.appendChild(senderEl);
         }
 
         const textEl = document.createElement("div");
-        textEl.textContent = text; // samma sak här, kritiskt
+        
+        textEl.textContent = text;
         wrapper.appendChild(textEl);
 
         if (!isSystem) {
             const timeEl = document.createElement("div");
             timeEl.className = "message-time";
-            timeEl.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+			const time = sentAt ? new Date(sentAt) : new Date();
+            timeEl.textContent = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             wrapper.appendChild(timeEl);
         }
 
@@ -330,8 +338,8 @@
         messagesBox.scrollTop = messagesBox.scrollHeight;
     }
 
-    connection.on("ReceiveMessage", (sender, text) => {
-        addMessage({ sender, text, isOwn: sender === "@User.Identity?.Name" });
+    connection.on("ReceiveMessage", (sender, text, sentAtUtc) => {
+        addMessage({ sender, text, isOwn: sender === "@User.Identity?.Name", sentAt: sentAtUtc });
     });
 
     connection.on("UserJoined", (userName) => {
@@ -361,7 +369,8 @@
             addMessage({
                 sender: m.senderName,
                 text: m.text,
-                isOwn: m.senderName === "@User.Identity?.Name"
+                isOwn: m.senderName === "@User.Identity?.Name",
+				sentAt: m.sentAtUtc
             });
         });
     });
@@ -431,7 +440,7 @@
         const response = await fetch("/Chat/CreateRoom", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `roomName=${encodeURIComponent(roomName)}`
+            body: `roomName=${encodeURIComponent(roomName)}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
         });
 
         if (response.ok) location.reload();
@@ -447,7 +456,7 @@
         const response = await fetch("/Chat/AddMember", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `roomId=${roomId}&userName=${encodeURIComponent(userName)}`
+            body: `roomId=${roomId}&userName=${encodeURIComponent(userName)}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
         });
 
         if (response.ok) alert("Medlem tillagd!");

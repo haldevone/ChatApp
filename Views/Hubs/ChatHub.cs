@@ -23,40 +23,50 @@ public class ChatHub : Hub
     public async Task JoinGroup(string groupName)
     {
         var userId = _userManager.GetUserId(Context.User);
-
-        var room = await _db.ChatRooms
-            .FirstOrDefaultAsync(r => r.Name == groupName);
-
-        bool isMember = room != null && await _db.ChatRoomMembers
-            .AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
-
-
-        if (!isMember)
+        
+        if (userId == null)
         {
             await Clients.Caller.SendAsync("JoinDenied", groupName);
             return;
         }
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+        var room = await _db.ChatRooms
+            .FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
 
-        await Clients.Caller.SendAsync("JoinApproved", groupName);
+        bool isMember = room != null && await _db.ChatRoomMembers
+            .AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+
+
+        if (!isMember || room == null)
+        {
+            await Clients.Caller.SendAsync("JoinDenied", groupName);
+            return;
+        }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, room.Name.ToLower());
+
+        await Clients.Caller.SendAsync("JoinApproved", room.Name);
 
         var history = await _db.Messages
-            .Where(m => m.ChatRoomId == room.Id)
-            .OrderBy(m => m.SentAtUtc)
-            .TakeLast(50)
+            .Where(m => m.ChatRoomId == room!.Id)
+            .OrderByDescending(m => m.SentAtUtc)
+            .Take(50)
             .Select(m => new { m.SenderName, m.Text, m.SentAtUtc })
             .ToListAsync();
 
+        history.Reverse();
+
         await Clients.Caller.SendAsync("LoadHistory", history);
 
-        await Clients.OthersInGroup(groupName).SendAsync("UserJoined", Context.User?.Identity?.Name);
+        await Clients.OthersInGroup(room.Name.ToLower()).SendAsync("UserJoined", Context.User?.Identity?.Name);
     }
 
     public async Task LeaveGroup(string groupName)
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
-        await Clients.OthersInGroup(groupName).SendAsync("UserLeft", Context.User?.Identity?.Name);
+        var normalizedGroupName = groupName.ToLower();
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, normalizedGroupName);
+        await Clients.OthersInGroup(normalizedGroupName).SendAsync("UserLeft", Context.User?.Identity?.Name);
     }
 
     public async Task SendMessageToGroup(string groupName, string message)
@@ -64,36 +74,39 @@ public class ChatHub : Hub
         if(string.IsNullOrWhiteSpace(message) || message.Length > 500)
             return;
 
-        var userId = _userManager.GetUserId(Context.User)!;
+        var userId = _userManager.GetUserId(Context.User!)!;
+
         var senderName = Context.User?.Identity?.Name ?? "Okänd";
 
-        var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name == groupName);
+        var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
         if (room == null) return;
 
         bool isMember = await _db.ChatRoomMembers.AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
         if (!isMember) return;
 
-        _db.Messages.Add(new Message
+        var newMessage = new Message
         {
             ChatRoomId = room.Id,
             SenderId = userId,
             SenderName = senderName,
             Text = message
-        });
+        };
+        _db.Messages.Add(newMessage);
         await _db.SaveChangesAsync();
 
-        await Clients.Group(groupName).SendAsync("ReceiveMessage", senderName, message);
+        await Clients.Group(room.Name.ToLower()).SendAsync("ReceiveMessage", senderName, message, newMessage.SentAtUtc);
     }
 
     public async Task NotifyTyping(string groupName)
     {
         var now = DateTime.UtcNow;
+        var normalizedGroupName = groupName.ToLower();
         if (_lastTypingCall.TryGetValue(Context.ConnectionId, out var lastCall) && (now - lastCall).TotalMilliseconds < 1000)
             return;
 
         _lastTypingCall[Context.ConnectionId] = now;
 
-        await Clients.OthersInGroup(groupName).SendAsync("UserTyping", Context.User?.Identity?.Name);
+        await Clients.OthersInGroup(normalizedGroupName).SendAsync("UserTyping", Context.User?.Identity?.Name);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

@@ -32,6 +32,7 @@ namespace ChatApp.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateRoom(string roomName)
         {
             if (string.IsNullOrWhiteSpace(roomName) || roomName.Length > 50)
@@ -49,6 +50,7 @@ namespace ChatApp.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> AddMember(int roomId, string userName)
         {
             var userId = _userManager.GetUserId(User);
