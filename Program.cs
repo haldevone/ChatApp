@@ -3,9 +3,18 @@ using Microsoft.EntityFrameworkCore;
 using ChatApp.Data;
 using ChatApp.Views.Hubs;
 using ChatApp.Models;
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File("Logs/chatapp-.log", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Host.UseSerilog();
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 

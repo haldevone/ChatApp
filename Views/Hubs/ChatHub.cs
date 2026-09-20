@@ -14,11 +14,13 @@ public class ChatHub : Hub
     private static readonly ConcurrentDictionary<string, DateTime> _lastTypingCall = new();
     private readonly ApplicationDbContext _db;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILogger<ChatHub> _logger;
 
-    public ChatHub(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
+    public ChatHub(ApplicationDbContext db, UserManager<ApplicationUser> userManager, ILogger<ChatHub> logger)
     {
         _db = db;
         _userManager = userManager;
+        _logger = logger;
     }
     public async Task JoinGroup(string groupName)
     {
@@ -39,9 +41,12 @@ public class ChatHub : Hub
 
         if (!isMember || room == null)
         {
+            _logger.LogWarning("Nekad gruppanslutning: användare {UserId} försökte gå med i {GroupName}", userId, groupName);
             await Clients.Caller.SendAsync("JoinDenied", groupName);
             return;
         }
+
+        _logger.LogInformation("{UserId} gick med i grupp {GroupName}", userId, room.Name);
 
         await Groups.AddToGroupAsync(Context.ConnectionId, room.Name.ToLower());
 
@@ -111,7 +116,7 @@ public class ChatHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        
+        _logger.LogInformation("Connection {ConnectionId} kopplade från", Context.ConnectionId);
         _lastTypingCall.TryRemove(Context.ConnectionId, out _);
         await base.OnDisconnectedAsync(exception);
     }
