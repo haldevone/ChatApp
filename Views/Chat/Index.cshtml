@@ -439,6 +439,34 @@
         connection.invoke("NotifyTyping", currentGroup).catch(err => console.error(err));
     });
 
+    const roomKeyDbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open("ChatAppRoomKeys", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("roomKeys");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+    async function saveRoomKeyLocally(roomId, aesKey) {
+        const jwk = await crypto.subtle.exportKey("jwk", aesKey);
+        const db = await roomKeyDbPromise;
+        const tx = db.transaction("roomKeys", "readwrite");
+        tx.objectStore("roomKeys").put(jwk, roomId);
+    }
+
+    async function loadRoomKeyLocally(roomId) {
+        const db = await roomKeyDbPromise;
+        const tx = db.transaction("roomKeys", "readonly");
+        const jwk = await new Promise(res => {
+            const req = tx.objectStore("roomKeys").get(roomId);
+            req.onsuccess = () => res(req.result);
+        });
+        if (!jwk) return null;
+
+        return crypto.subtle.importKey(
+            "jwk", jwk, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]
+        );
+    }
+
     let hideTypingTimer = null;
 
     function setConnectedUi(isConnected) {
@@ -603,20 +631,88 @@
         const userName = document.getElementById("addMemberUserName").value.trim();
         if (!roomId || !userName) return;
 
-        const response = await fetch("/Chat/AddMember", {
+        const addResponse = await fetch("/Chat/AddMember", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: `roomId=${roomId}&userName=${encodeURIComponent(userName)}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
         });
 
-        if (response.ok) alert("Medlem tillagd!");
-        else alert("Kunde inte lägga till medlem (fel rum-ID eller inte ägare).");
+        if (!addResponse.ok) {
+            alert("Kunde inte lägga till medlem (fel rum-ID eller inte ägare).");
+            return;
+        }
+
+        // Hämta nya medlemmens publika ECDH-nyckel
+        const keyResponse = await fetch(`/Chat/GetPublicKey?userName=${encodeURIComponent(userName)}`);
+        if (!keyResponse.ok) {
+            alert("Medlem tillagd, men saknar publik nyckel (har inte loggat in i chatten än).");
+            return;
+        }
+        const { publicKey } = await keyResponse.json();
+        const memberPublicKey = await crypto.subtle.importKey(
+            "jwk", JSON.parse(publicKey), { name: "ECDH", namedCurve: "P-256" }, true, []
+        );
+
+        // Härled delad hemlighet: min privata + deras publika
+        const sharedSecret = await crypto.subtle.deriveKey(
+            { name: "ECDH", public: memberPublicKey },
+            myPrivateKey,
+            { name: "AES-GCM", length: 256 },
+            false, ["encrypt", "decrypt"]
+        );
+
+        // Kryptera rumsnyckeln med den delade hemligheten
+        const roomAesKey = await loadRoomKeyLocally(roomId);
+        const rawRoomKey = await crypto.subtle.exportKey("raw", roomAesKey);
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encryptedKeyBuffer = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv }, sharedSecret, rawRoomKey
+        );
+
+        // Behöver mottagarens userId, inte bara username — hämta via AddMember-svaret istället
+        await fetch("/Chat/SaveEncryptedRoomKey", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `roomId=${roomId}&targetUserId=${encodeURIComponent(targetUserId)}&encryptedKey=${encodeURIComponent(arrayBufferToBase64(encryptedKeyBuffer))}&iv=${encodeURIComponent(arrayBufferToBase64(iv))}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
+        });
+
+        alert("Medlem tillagd och nyckel distribuerad!");
     });
+
+    function arrayBufferToBase64(buffer) {
+        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    }
 
     document.querySelectorAll(".room-badge").forEach(badge => {
         badge.addEventListener("click", async () => {
             switchGroup(badge.dataset.roomName);
         });
+    });
+
+    document.getElementById("createRoomForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const roomName = document.getElementById("newRoomName").value.trim();
+        if (!roomName) return;
+
+        const response = await fetch("/Chat/CreateRoom", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `roomName=${encodeURIComponent(roomName)}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
+        });
+
+        if (!response.ok) {
+            alert("Kunde inte skapa rum.");
+            return;
+        }
+
+        const result = await response.json();
+        const roomAesKey = await crypto.subtle.generateKey(
+            { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]
+        );
+
+        await saveRoomKeyLocally(result.roomId, roomAesKey);
+
+        location.reload();
     });
 
     connection.start()

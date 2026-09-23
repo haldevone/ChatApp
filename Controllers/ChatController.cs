@@ -46,7 +46,7 @@ namespace ChatApp.Controllers
             _db.ChatRooms.Add(room);
             await _db.SaveChangesAsync();
 
-            return RedirectToAction("Index");
+            return Json(new { roomId = room.Id });
         }
 
         [HttpPost]
@@ -69,7 +69,7 @@ namespace ChatApp.Controllers
             _db.ChatRoomMembers.Add(new ChatRoomMember { ChatRoomId = roomId, UserId = targetUser.Id });
             await _db.SaveChangesAsync();
 
-            return Ok();
+            return Json(new { userId = targetUser.Id });
         }
 
         [HttpPost]
@@ -94,6 +94,45 @@ namespace ChatApp.Controllers
             if (user?.EcdhPublicKey == null) return NotFound();
             
             return Json(new { publicKey = user.EcdhPublicKey });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveEncryptedRoomKey(int roomId, string targetUserId, string encryptedKey, string iv)
+        {
+            var userId = _userManager.GetUserId(User);
+            var room = await _db.ChatRooms.FindAsync(roomId);
+            if (room == null || room.OwnerId != userId) return Forbid();
+
+            var member = await _db.ChatRoomMembers
+                .FirstOrDefaultAsync(m => m.ChatRoomId == roomId && m.UserId == targetUserId);
+            if (member == null) return NotFound("Medlemmen finns inte i rummet.");
+
+            member.EncryptedRoomKey = encryptedKey;
+            member.KeyEncryptionIv = iv;
+            await _db.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetMyEncryptedRoomKey(int roomId)
+        {
+            var userId = _userManager.GetUserId(User);
+
+            var member = await _db.ChatRoomMembers
+                .FirstOrDefaultAsync(m => m.ChatRoomId == roomId && m.UserId == userId);
+            if (member?.EncryptedRoomKey == null) return NotFound();
+
+            var room = await _db.ChatRooms.FindAsync(roomId);
+            var owner = await _userManager.FindByIdAsync(room!.OwnerId);
+
+            return Json(new
+            {
+                encryptedKey = member.EncryptedRoomKey,
+                iv = member.KeyEncryptionIv,
+                ownerPublicKey = owner?.EcdhPublicKey
+            });
         }
 
     }

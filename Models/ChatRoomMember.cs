@@ -6,4 +6,8 @@ public class ChatRoomMember
     public string UserId { get; set; } = string.Empty;
     public int ChatRoomId { get; set; }
     public ChatRoom ChatRoom { get; set; } = null!;
+
+
+    public string? EncryptedRoomKey { get; set; }
+    public string? KeyEncryptionIv { get; set; }
 }
