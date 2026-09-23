@@ -5,4 +5,5 @@ namespace ChatApp.Models;
 public class ApplicationUser : IdentityUser
 {
     public string? DisplayName { get; set; }
+    public string? EcdhPublicKey { get; set; }
 }

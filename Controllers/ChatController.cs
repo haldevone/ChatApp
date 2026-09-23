@@ -72,5 +72,29 @@ namespace ChatApp.Controllers
             return Ok();
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SavePublicKey(string publicKeyJwk)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            
+            if (user == null) return Unauthorized();
+
+            user.EcdhPublicKey = publicKeyJwk;
+            await _db.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetPublicKey(string userName)
+        {
+            var user = await _userManager.FindByNameAsync(userName);
+            
+            if (user?.EcdhPublicKey == null) return NotFound();
+            
+            return Json(new { publicKey = user.EcdhPublicKey });
+        }
+
     }
 }

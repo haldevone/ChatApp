@@ -379,7 +379,60 @@
     const membersList = document.getElementById("membersList");
     const typingIndicator = document.getElementById("typingIndicator");
 
+    const keyDbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open("ChatAppKeys", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("keys");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
     let typingTimeout = null;
+
+    async function getOrCreateKeyPair() {
+        const db = await keyDbPromise;
+        const tx = db.transaction("keys", "readonly");
+        const existing = await new Promise(res => {
+            const req = tx.objectStore("keys").get("ecdhPrivateKey");
+            req.onsuccess = () => res(req.result);
+        });
+
+        if (existing) {
+            const privateKey = await crypto.subtle.importKey(
+                "jwk", existing, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
+            );
+            return { privateKey, isNew: false };
+        }
+
+        const keyPair = await crypto.subtle.generateKey(
+            { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
+        );
+        const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+
+        const writeTx = db.transaction("keys", "readwrite");
+        writeTx.objectStore("keys").put(privateJwk, "ecdhPrivateKey");
+
+        return { privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, isNew: true };
+    }
+
+    async function ensureKeysRegistered() {
+        const result = await getOrCreateKeyPair();
+
+        if (result.isNew) {
+            const publicJwk = await crypto.subtle.exportKey("jwk", result.publicKey);
+            await fetch("/Chat/SavePublicKey", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: `publicKeyJwk=${encodeURIComponent(JSON.stringify(publicJwk))}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
+            });
+        }
+
+        return result.privateKey;
+    }
+
+
+    let myPrivateKey = null;
+
+    ensureKeysRegistered().then(key => { myPrivateKey = key; });
 
     messageInput.addEventListener("input", () => {
         if (!currentGroup) return;
