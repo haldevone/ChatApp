@@ -9,31 +9,34 @@
 @model List<ChatApp.Models.ChatRoom>
 @Html.AntiForgeryToken()
 
-<div class="rooms-panel">
-    <h5>Dina rum</h5>
-    <ul id="myRoomsList">
-        @foreach (var room in Model)
-        {
-            <li>@room.Name</li>
-        }
-    </ul>
+<div class="rooms-wrapper">
+    <div class="rooms-panel">
+        <h5>Dina rum</h5>
+        <div id="myRoomsList" class="rooms-badges">
+            @foreach (var room in Model)
+            {
+                <span class="room-badge" data-room-name="@room.Name">@room.Name</span>
+            }
+        </div>
 
-    <form id="createRoomForm">
-        <input id="newRoomName" type="text" placeholder="Nytt rumsnamn" maxlength="50" />
-        <button type="submit" class="btn-primary">Skapa rum</button>
-    </form>
+        <form id="createRoomForm">
+            <input id="newRoomName" type="text" placeholder="Nytt rumsnamn" maxlength="50" />
+            <button type="submit" class="btn-primary">Skapa rum</button>
+        </form>
 
-    <form id="addMemberForm">
-        <input id="addMemberRoomId" type="number" placeholder="Rum-ID" />
-        <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
-        <button type="submit" class="btn-primary">Lägg till medlem</button>
-    </form>
+        <form id="addMemberForm">
+            <input id="addMemberRoomId" type="number" placeholder="Rum-ID" />
+            <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
+            <button type="submit" class="btn-primary">Lägg till medlem</button>
+        </form>
+    </div>
 </div>
 
 <div class="chat-wrapper">
     <div class="chat-container">
         <div class="chat-header">
             <h4>ChatApp</h4>
+            <span class="logged-in-as">Inloggad som: <strong>@User.Identity?.Name</strong></span>
             <span id="connectionStatus" class="status-badge status-disconnected">Frånkopplad</span>
         </div>
 
@@ -64,6 +67,8 @@
         </div>
     </div>
 </div>
+
+
 
 <style>
     .chat-wrapper {
@@ -96,6 +101,89 @@
     .chat-header h4 {
         margin: 0;
         font-size: 1.1rem;
+    }
+
+    .rooms-panel{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+        max-width: 480px;
+        gap: 0.8rem;
+    }
+
+    .rooms-panel h5,
+    .rooms-panel ul,
+    .rooms-panel form {
+        width: 100%;
+        margin: 0;
+    }
+
+    .rooms-panel ul {
+        list-style: none;
+        padding: 0;
+        text-align: center;
+    }
+
+    .rooms-panel form {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .rooms-panel input {
+        flex: 1;
+        min-width: 0;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid #d8dde3;
+        border-radius: 6px;
+    }
+
+    .rooms-panel button {
+        flex-shrink: 0;
+    }
+
+    .rooms-panel ul {
+        list-style: none;
+        padding: 0;
+        text-align: left;
+    }
+
+    .rooms-wrapper {
+        display: flex;
+        justify-content: center;
+        padding: 1.5rem 1rem;
+    }
+
+    .rooms-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: center;
+    }
+
+    .room-badge {
+        background: #e8f0fe;
+        color: #1e3a8a;
+        border: 1px solid #bcd5fb;
+        padding: 0.35rem 0.9rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .room-badge:hover {
+        background: #bcd5fb;
+    }
+
+    .logged-in-as {
+        font-size: 0.8rem;
+        color: #cbd2d9;
+    }
+
+    .logged-in-as strong {
+        color: #fff;
     }
 
     .status-badge {
@@ -338,6 +426,23 @@
         messagesBox.scrollTop = messagesBox.scrollHeight;
     }
 
+    async function switchGroup(newGroupName) {
+        if (newGroupName === currentGroup) return;
+
+        if (currentGroup) {
+            await connection.invoke("LeaveGroup", currentGroup);
+            currentGroup = null;
+            activeGroupBox.style.display = "none";
+            groupPanel.style.display = "flex";
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+        }
+
+        if (newGroupName) {
+            await connection.invoke("JoinGroup", newGroupName);
+        }
+    }
+
     connection.on("ReceiveMessage", (sender, text, sentAtUtc) => {
         addMessage({ sender, text, isOwn: sender === "@User.Identity?.Name", sentAt: sentAtUtc });
     });
@@ -402,20 +507,12 @@
         const groupName = groupInput.value.trim();
         if (!groupName) return;
 
-        await connection.invoke("JoinGroup", groupName);
+        switchGroup(groupName);
     });
 
     leaveGroupBtn.addEventListener("click", async () => {
         if (!currentGroup) return;
-
-        await connection.invoke("LeaveGroup", currentGroup);
-        currentGroup = null;
-
-        activeGroupBox.style.display = "none";
-        groupPanel.style.display = "flex";
-
-        messageInput.disabled = true;
-        sendBtn.disabled = true;
+        switchGroup(null);
     });
 
     sendBtn.addEventListener("click", sendMessage);
@@ -461,6 +558,12 @@
 
         if (response.ok) alert("Medlem tillagd!");
         else alert("Kunde inte lägga till medlem (fel rum-ID eller inte ägare).");
+    });
+
+    document.querySelectorAll(".room-badge").forEach(badge => {
+        badge.addEventListener("click", async () => {
+            switchGroup(badge.dataset.roomName);
+        });
     });
 
     connection.start()
