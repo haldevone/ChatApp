@@ -40,6 +40,12 @@ namespace ChatApp.Controllers
 
             var userId = _userManager.GetUserId(User)!;
 
+            bool alreadyExists = await _db.ChatRooms
+                .AnyAsync(r => r.Name.ToLower() == roomName.Trim().ToLower() && r.OwnerId == userId);
+
+            if (alreadyExists)
+                return BadRequest("Rummet finns redan.");
+
             var room = new ChatRoom { Name = roomName.Trim(), OwnerId = userId };
             room.Members.Add(new ChatRoomMember { UserId = userId, ChatRoom = room });
 
@@ -57,10 +63,14 @@ namespace ChatApp.Controllers
 
             var room = await _db.ChatRooms.FindAsync(roomId);
 
-            if (room == null || room.OwnerId != userId) return Forbid();
+            if (room == null || room.OwnerId != userId)
+                return StatusCode(403, "Du äger inte det här rummet.");
 
             var targetUser = await _userManager.FindByNameAsync(userName);
             if (targetUser == null) return NotFound("Användare finns inte.");
+
+            if (targetUser.Id == room.OwnerId)
+                return BadRequest("Ägaren är redan medlem i rummet.");
 
             bool alreadyMember = await _db.ChatRoomMembers
                 .AnyAsync(m => m.ChatRoomId == roomId && m.UserId == targetUser.Id);
