@@ -1,5 +1,6 @@
 ﻿using ChatApp.Data;
 using ChatApp.Models;
+using ChatApp.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -12,16 +13,32 @@ namespace ChatApp.Controllers
     {
         private readonly ApplicationDbContext _db;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly JwtTokenService _jwtTokenService;
 
-        public ChatController(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
+        public ChatController(ApplicationDbContext db, UserManager<ApplicationUser> userManager, JwtTokenService jwtTokenService)
         {
             _db = db;
             _userManager = userManager;
+            _jwtTokenService = jwtTokenService;
         }
 
         public async Task<IActionResult> Index()
         {
             var userId = _userManager.GetUserId(User);
+            var userName = User.Identity?.Name;
+
+            if (userId == null || userName == null)
+                return Challenge();
+
+            var token = _jwtTokenService.GenerateToken(userId, userName);
+
+            Response.Cookies.Append("jwt_token", token, new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Strict,
+                Expires = DateTimeOffset.UtcNow.AddHours(2)
+            });
 
             var myRooms = await _db.ChatRoomMembers
                 .Where(m => m.UserId == userId)
