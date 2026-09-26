@@ -10,4 +10,6 @@ public class Message
     public string SenderName { get; set; } = string.Empty;
     public string Text { get; set; } = string.Empty;
     public DateTime SentAtUtc { get; set; } = DateTime.UtcNow;
+
+    public string? Iv { get; set; }
 }
