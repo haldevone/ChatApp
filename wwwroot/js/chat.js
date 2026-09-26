@@ -6,6 +6,8 @@ const connection = new signalR.HubConnectionBuilder()
     .build();
 
 let currentGroup = null;
+let currentRoomId = null;
+let currentRoomKey = null;
 
 const groupPanel = document.getElementById("groupPanel");
 const activeGroupBox = document.getElementById("activeGroupBox");
@@ -35,38 +37,46 @@ let typingTimeout = null;
 async function getOrCreateKeyPair() {
     const db = await keyDbPromise;
     const tx = db.transaction("keys", "readonly");
-    const existing = await new Promise(res => {
+    const existingPrivate = await new Promise(res => {
         const req = tx.objectStore("keys").get("ecdhPrivateKey");
         req.onsuccess = () => res(req.result);
     });
+    const existingPublic = await new Promise(res => {
+        const req = tx.objectStore("keys").get("ecdhPublicKey");
+        req.onsuccess = () => res(req.result);
+    });
 
-    if (existing) {
+    if (existingPrivate && existingPublic) {
         const privateKey = await crypto.subtle.importKey(
-            "jwk", existing, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
+            "jwk", existingPrivate, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
         );
-        return { privateKey, isNew: false };
+        return { privateKey, publicJwk: existingPublic, isNew: false };
     }
 
     const keyPair = await crypto.subtle.generateKey(
         { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
     );
     const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+    const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
 
     const writeTx = db.transaction("keys", "readwrite");
     writeTx.objectStore("keys").put(privateJwk, "ecdhPrivateKey");
+    writeTx.objectStore("keys").put(publicJwk, "ecdhPublicKey");
 
-    return { privateKey: keyPair.privateKey, publicKey: keyPair.publicKey, isNew: true };
+    return { privateKey: keyPair.privateKey, publicJwk, isNew: true };
 }
+
 
 async function ensureKeysRegistered() {
     const result = await getOrCreateKeyPair();
 
-    if (result.isNew) {
-        const publicJwk = await crypto.subtle.exportKey("jwk", result.publicKey);
+    const checkResponse = await fetch(`/Chat/GetPublicKey?userName=${encodeURIComponent(currentUserName)}`);
+    if (!checkResponse.ok) {
+        // Servern saknar vår publika nyckel (t.ex. efter databas-rensning) — ladda upp igen
         await fetch("/Chat/SavePublicKey", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `publicKeyJwk=${encodeURIComponent(JSON.stringify(publicJwk))}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
+            body: `publicKeyJwk=${encodeURIComponent(JSON.stringify(result.publicJwk))}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
         });
     }
 
@@ -151,6 +161,7 @@ function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
     messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
+
 async function switchGroup(newGroupName) {
     if (newGroupName === currentGroup) return;
 
@@ -168,8 +179,24 @@ async function switchGroup(newGroupName) {
     }
 }
 
-connection.on("ReceiveMessage", (sender, text, sentAtUtc) => {
-    addMessage({ sender, text, isOwn: sender === currentUserName, sentAt: sentAtUtc });
+async function decryptMessage(encryptedText, iv) {
+    try {
+        const decrypted = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: base64ToArrayBuffer(iv) },
+            currentRoomKey,
+            base64ToArrayBuffer(encryptedText)
+        );
+        return new TextDecoder().decode(decrypted);
+    } catch {
+        return "[Kunde inte dekryptera meddelandet]";
+    }
+}
+
+connection.on("ReceiveMessage", async (sender, encryptedText, iv, sentAtUtc) => {
+    if (!currentRoomKey) return;
+
+    const plaintext = await decryptMessage(encryptedText, iv);
+    addMessage({ sender, text: plaintext, isOwn: sender === currentUserName, sentAt: sentAtUtc });
 });
 
 connection.on("UserJoined", (userName) => {
@@ -193,20 +220,22 @@ connection.on("JoinDenied", (groupName) => {
     alert(`Du har inte behörighet till rummet "${groupName}".`);
 });
 
-connection.on("LoadHistory", (messages) => {
+connection.on("LoadHistory", async (messages) => {
     messagesBox.innerHTML = "";
-    messages.forEach(m => {
+    for (const m of messages) {
+        const plaintext = await decryptMessage(m.text, m.iv);
         addMessage({
             sender: m.senderName,
-            text: m.text,
+            text: plaintext,
             isOwn: m.senderName === currentUserName,
-			sentAt: m.sentAtUtc
+            sentAt: m.sentAtUtc
         });
-    });
+    }
 });
 
-connection.on("JoinApproved", (groupName) => {
+connection.on("JoinApproved", async (groupName, roomId) => {
     currentGroup = groupName;
+    currentRoomId = roomId;
     groupPanel.style.display = "none";
     activeGroupBox.style.display = "flex";
 
@@ -220,6 +249,45 @@ connection.on("JoinApproved", (groupName) => {
     messageInput.disabled = false;
     sendBtn.disabled = false;
     groupInput.value = "";
+
+    currentRoomKey = await loadRoomKeyLocally(roomId);
+    console.log("Lokal nyckel:", currentRoomKey);
+
+    if (!currentRoomKey) {
+        const response = await fetch(`/Chat/GetMyEncryptedRoomKey?roomId=${roomId}`);
+        console.log("GetMyEncryptedRoomKey status:", response.status);
+        if (!response.ok) {
+            alert("Kunde inte hämta rumsnyckel.");
+            return;
+        }
+        const { encryptedKey, iv, ownerPublicKey } = await response.json();
+        console.log("Fick från servern:", { encryptedKey, iv, ownerPublicKey });
+
+        // ... resten oförändrat, men lägg en catch runt dekrypteringen:
+        try {
+            const ownerKey = await crypto.subtle.importKey(
+                "jwk", JSON.parse(ownerPublicKey), { name: "ECDH", namedCurve: "P-256" }, true, []
+            );
+            const sharedSecret = await crypto.subtle.deriveKey(
+                { name: "ECDH", public: ownerKey },
+                myPrivateKey,
+                { name: "AES-GCM", length: 256 },
+                false, ["encrypt", "decrypt"]
+            );
+            const rawRoomKey = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: base64ToArrayBuffer(iv) },
+                sharedSecret,
+                base64ToArrayBuffer(encryptedKey)
+            );
+            currentRoomKey = await crypto.subtle.importKey(
+                "raw", rawRoomKey, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]
+            );
+            await saveRoomKeyLocally(roomId, currentRoomKey);
+            console.log("Dekryptering lyckades, nyckel satt");
+        } catch (err) {
+            console.error("Dekryptering av rumsnyckel misslyckades:", err);
+        }
+    }
 });
 
 connection.on("JoinDenied", (groupName) => {
@@ -240,19 +308,45 @@ leaveGroupBtn.addEventListener("click", async () => {
     switchGroup(null);
 });
 
-sendBtn.addEventListener("click", sendMessage);
+// sendBtn.addEventListener("click", sendMessage);
     
-messageInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendMessage();
+// messageInput.addEventListener("keydown", (e) => {
+
+//     if (e.key === "Enter") sendMessage();
+// });
+sendBtn.addEventListener("click", () => {
+    sendMessage();
 });
 
 async function sendMessage() {
-    const text = messageInput.value.trim();
-    if (!text || !currentGroup) return;
 
-    await connection.invoke("SendMessageToGroup", currentGroup, text);
+    const text = messageInput.value.trim();
+
+    if (!text || !currentGroup || !currentRoomKey) return;
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(text);
+    const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv }, currentRoomKey, encoded
+    );
+
+    console.log("ciphertext:", ciphertext, "byteLength:", ciphertext.byteLength);
+    console.log("iv:", iv, "length:", iv.length);
+    const ciphertextB64 = arrayBufferToBase64(ciphertext);
+    const ivB64 = arrayBufferToBase64(iv);
+
+    console.log("ciphertextB64:", ciphertextB64);
+    console.log("ivB64:", ivB64);
+
+    await connection.invoke(
+        "SendMessageToGroup",
+        currentGroup,
+        arrayBufferToBase64(ciphertext),
+        arrayBufferToBase64(iv)
+    );
     messageInput.value = "";
 }
+
 
 document.getElementById("addMemberForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -270,6 +364,9 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
         alert("Kunde inte lägga till medlem (fel rum-ID eller inte ägare).");
         return;
     }
+
+    const addResult = await addResponse.json();
+    const targetUserId = addResult.userId;
 
     // Hämta nya medlemmens publika ECDH-nyckel
     const keyResponse = await fetch(`/Chat/GetPublicKey?userName=${encodeURIComponent(userName)}`);
@@ -309,7 +406,16 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
 });
 
 function arrayBufferToBase64(buffer) {
-    return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+}
+function base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
 }
 
 document.querySelectorAll(".room-badge").forEach(badge => {

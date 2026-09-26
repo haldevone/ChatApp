@@ -50,13 +50,13 @@ public class ChatHub : Hub
 
         await Groups.AddToGroupAsync(Context.ConnectionId, room.Name.ToLower());
 
-        await Clients.Caller.SendAsync("JoinApproved", room.Name);
+        await Clients.Caller.SendAsync("JoinApproved", room.Name, room.Id);
 
         var history = await _db.Messages
-            .Where(m => m.ChatRoomId == room!.Id)
+            .Where(m => m.ChatRoomId == room.Id)
             .OrderByDescending(m => m.SentAtUtc)
             .Take(50)
-            .Select(m => new { m.SenderName, m.Text, m.SentAtUtc })
+            .Select(m => new { m.SenderName, m.Text, m.Iv, m.SentAtUtc })
             .ToListAsync();
 
         history.Reverse();
@@ -74,32 +74,47 @@ public class ChatHub : Hub
         await Clients.OthersInGroup(normalizedGroupName).SendAsync("UserLeft", Context.User?.Identity?.Name);
     }
 
-    public async Task SendMessageToGroup(string groupName, string message)
+    public async Task SendMessageToGroup(string groupName, string encryptedText, string iv)
     {
-        if(string.IsNullOrWhiteSpace(message) || message.Length > 500)
+        _logger.LogInformation("SendMessageToGroup anropad: {GroupName}", groupName);
+
+        if (string.IsNullOrWhiteSpace(encryptedText) || encryptedText.Length > 2000)
+        {
+            _logger.LogWarning("Ogiltigt meddelande skickat till grupp {GroupName}", groupName);
             return;
+        }
 
         var userId = _userManager.GetUserId(Context.User!)!;
 
         var senderName = Context.User?.Identity?.Name ?? "Okänd";
 
         var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
-        if (room == null) return;
+        if (room == null)
+        {
+            _logger.LogWarning("Rum hittades inte: {GroupName}", groupName);
+            return;
+        }
 
         bool isMember = await _db.ChatRoomMembers.AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
-        if (!isMember) return;
+        if (!isMember)
+        {
+            _logger.LogWarning("Användare {UserId} är inte medlem i {GroupName}", userId, groupName);
+            return;
+        }
+
 
         var newMessage = new Message
         {
             ChatRoomId = room.Id,
             SenderId = userId,
             SenderName = senderName,
-            Text = message
+            Text = encryptedText,
+            Iv = iv,
         };
         _db.Messages.Add(newMessage);
         await _db.SaveChangesAsync();
 
-        await Clients.Group(room.Name.ToLower()).SendAsync("ReceiveMessage", senderName, message, newMessage.SentAtUtc);
+        await Clients.Group(room.Name.ToLower()).SendAsync("ReceiveMessage", senderName, encryptedText, iv, newMessage.SentAtUtc);
     }
 
     public async Task NotifyTyping(string groupName)
