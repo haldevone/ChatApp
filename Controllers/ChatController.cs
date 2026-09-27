@@ -1,9 +1,11 @@
 ﻿using ChatApp.Data;
 using ChatApp.Models;
 using ChatApp.Services;
+using ChatApp.Views.Hubs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChatApp.Controllers
@@ -14,12 +16,15 @@ namespace ChatApp.Controllers
         private readonly ApplicationDbContext _db;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly JwtTokenService _jwtTokenService;
+        private readonly IHubContext<ChatHub> _hubContext;
 
-        public ChatController(ApplicationDbContext db, UserManager<ApplicationUser> userManager, JwtTokenService jwtTokenService)
+        public ChatController(ApplicationDbContext db, UserManager<ApplicationUser> userManager, 
+            JwtTokenService jwtTokenService, IHubContext<ChatHub> hubContext)
         {
             _db = db;
             _userManager = userManager;
             _jwtTokenService = jwtTokenService;
+            _hubContext = hubContext;
         }
 
         public async Task<IActionResult> Index()
@@ -99,6 +104,8 @@ namespace ChatApp.Controllers
 
             _db.ChatRoomMembers.Add(new ChatRoomMember { ChatRoomId = roomId, UserId = targetUser.Id });
             await _db.SaveChangesAsync();
+
+            await _hubContext.Clients.User(targetUser.Id).SendAsync("AddedToRoom", roomId, room.Name);
 
             return Json(new { userId = targetUser.Id });
         }

@@ -84,10 +84,6 @@ async function ensureKeysRegistered() {
 }
 
 
-let myPrivateKey = null;
-
-ensureKeysRegistered().then(key => { myPrivateKey = key; });
-
 messageInput.addEventListener("input", () => {
     if (!currentGroup) return;
     connection.invoke("NotifyTyping", currentGroup).catch(err => console.error(err));
@@ -218,6 +214,15 @@ connection.on("UserTyping", (userName) => {
 	hideTypingTimer = setTimeout(() => {
 		typingIndicator.textContent = "";
 	}, 2000);
+});
+
+connection.on("AddedToRoom", (roomId, roomName) => {
+    const badge = document.createElement("span");
+    badge.className = "room-badge";
+    badge.dataset.roomName = roomName;
+    badge.textContent = roomName;
+    badge.addEventListener("click", () => switchGroup(roomName));
+    document.getElementById("myRoomsList").appendChild(badge);
 });
 
 connection.on("JoinDenied", (groupName) => {
@@ -439,12 +444,20 @@ document.getElementById("createRoomForm").addEventListener("submit", async (e) =
     location.reload();
 });
 
-connection.start()
-    .then(() => setConnectedUi(true))
-    .catch(err => {
-        console.error("Kunde inte ansluta:", err);
-        setConnectedUi(false);
-    });
+let myPrivateKey = null;
+
+async function initializeApp() {
+    myPrivateKey = await ensureKeysRegistered();
+
+    connection.start()
+        .then(() => setConnectedUi(true))
+        .catch(err => {
+            console.error("Kunde inte ansluta:", err);
+            setConnectedUi(false);
+        });
+}
+
+initializeApp();
 
 connection.onreconnecting(() => setConnectedUi(false));
 connection.onreconnected(() => setConnectedUi(true));
