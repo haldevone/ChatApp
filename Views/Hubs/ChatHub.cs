@@ -1,0 +1,151 @@
+﻿using ChatApp.Data;
+using ChatApp.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
+
+namespace ChatApp.Views.Hubs;
+
+[Authorize]
+public class ChatHub : Hub
+{
+    private static readonly ConcurrentDictionary<string, DateTime> _lastTypingCall = new();
+    private readonly ApplicationDbContext _db;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILogger<ChatHub> _logger;
+
+    public ChatHub(ApplicationDbContext db, UserManager<ApplicationUser> userManager, ILogger<ChatHub> logger)
+    {
+        _db = db;
+        _userManager = userManager;
+        _logger = logger;
+    }
+    public async Task JoinGroup(string groupName)
+    {
+        var userId = _userManager.GetUserId(Context.User);
+        
+        if (userId == null)
+        {
+            await Clients.Caller.SendAsync("JoinDenied", groupName);
+            return;
+        }
+
+        // Skiftlägesokänslig matchning: SQLite gör exakt strängjämförelse som standard,
+        // så "Test" och "test" skulle annars räknas som olika rum.
+        var room = await _db.ChatRooms
+            .FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
+
+        // Behörighetskontroll sker alltid server-side, aldrig bara i klienten -
+        // klienten kan inte lita på att bara visa/dölja UI-element som skydd.
+        // Kontrollera om användaren är medlem i rummet.
+        bool isMember = room != null && await _db.ChatRoomMembers
+            .AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+
+
+        if (!isMember || room == null)
+        {
+            _logger.LogWarning("Nekad gruppanslutning: användare {UserId} försökte gå med i {GroupName}", userId, groupName);
+            await Clients.Caller.SendAsync("JoinDenied", groupName);
+            return;
+        }
+
+        // SignalR-gruppnamnet normaliseras till lowercase konsekvent i alla metoder
+        // (JoinGroup, LeaveGroup, SendMessageToGroup, NotifyTyping) - annars hamnar
+        // användare i olika SignalR-grupper trots att de pekar på samma databas-rum.
+        await Groups.AddToGroupAsync(Context.ConnectionId, room.Name.ToLower());
+
+        _logger.LogInformation("{UserId} gick med i grupp {GroupName}", userId, room.Name);
+
+        await Clients.Caller.SendAsync("JoinApproved", room.Name, room.Id);
+
+        // Historik skickas ur databasen krypterad - klienten dekrypterar själv
+        // med rummets AES-nyckel, servern har aldrig sett klartexten.
+        var history = await _db.Messages
+            .Where(m => m.ChatRoomId == room.Id)
+            .OrderByDescending(m => m.SentAtUtc)
+            .Take(50)
+            .Select(m => new { m.SenderName, m.Text, m.Iv, m.SentAtUtc })
+            .ToListAsync();
+
+        history.Reverse();
+
+        await Clients.Caller.SendAsync("LoadHistory", history);
+
+        await Clients.OthersInGroup(room.Name.ToLower()).SendAsync("UserJoined", Context.User?.Identity?.Name);
+    }
+
+    public async Task LeaveGroup(string groupName)
+    {
+        var normalizedGroupName = groupName.ToLower();
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, normalizedGroupName);
+        await Clients.OthersInGroup(normalizedGroupName).SendAsync("UserLeft", Context.User?.Identity?.Name);
+    }
+
+    public async Task SendMessageToGroup(string groupName, string encryptedText, string iv)
+    {
+        // Meddelandet är redan AES-GCM-krypterat av klienten innan det når hit -
+        // servern lagrar och vidarebefordrar bara krypterad data, ser aldrig klartext.
+        _logger.LogInformation("SendMessageToGroup anropad: {GroupName}", groupName);
+
+        if (string.IsNullOrWhiteSpace(encryptedText) || encryptedText.Length > 2000)
+        {
+            return;
+        }
+
+        var userId = _userManager.GetUserId(Context.User!)!;
+
+        var senderName = Context.User?.Identity?.Name ?? "Okänd";
+
+        var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
+        if (room == null)
+        {
+            return;
+        }
+
+        // Dubbel behörighetskontroll: klienten har redan gått igenom JoinGroup,
+        // men vi litar inte på det - varje skrivning verifieras oberoende.
+        bool isMember = await _db.ChatRoomMembers.AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+
+        if (!isMember)
+        {
+            return;
+        }
+
+
+        var newMessage = new Message
+        {
+            ChatRoomId = room.Id,
+            SenderId = userId,
+            SenderName = senderName,
+            Text = encryptedText,
+            Iv = iv,
+        };
+        _db.Messages.Add(newMessage);
+        await _db.SaveChangesAsync();
+
+        await Clients.Group(room.Name.ToLower()).SendAsync("ReceiveMessage", senderName, encryptedText, iv, newMessage.SentAtUtc);
+    }
+
+    public async Task NotifyTyping(string groupName)
+    {
+        var now = DateTime.UtcNow;
+        var normalizedGroupName = groupName.ToLower();
+        if (_lastTypingCall.TryGetValue(Context.ConnectionId, out var lastCall) && (now - lastCall).TotalMilliseconds < 1000)
+            return;
+
+        _lastTypingCall[Context.ConnectionId] = now;
+
+        await Clients.OthersInGroup(normalizedGroupName).SendAsync("UserTyping", Context.User?.Identity?.Name);
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        _logger.LogInformation("Connection {ConnectionId} kopplade från", Context.ConnectionId);
+        _lastTypingCall.TryRemove(Context.ConnectionId, out _);
+        await base.OnDisconnectedAsync(exception);
+    }
+
+}

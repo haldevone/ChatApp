@@ -3,6 +3,7 @@ using System;
 using ChatApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ChatApp.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260923110242_AddEcdhPublicKey")]
+    partial class AddEcdhPublicKey
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -115,12 +118,6 @@ namespace ChatApp.Data.Migrations
                     b.Property<int>("ChatRoomId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("EncryptedRoomKey")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("KeyEncryptionIv")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -140,9 +137,6 @@ namespace ChatApp.Data.Migrations
 
                     b.Property<int>("ChatRoomId")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Iv")
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("SenderId")
                         .IsRequired()

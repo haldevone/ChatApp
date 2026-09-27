@@ -3,6 +3,7 @@ using System;
 using ChatApp.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ChatApp.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260919121440_ExtendToApplicationUser")]
+    partial class ExtendToApplicationUser
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -30,9 +33,6 @@ namespace ChatApp.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DisplayName")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("EcdhPublicKey")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Email")
@@ -115,12 +115,6 @@ namespace ChatApp.Data.Migrations
                     b.Property<int>("ChatRoomId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("EncryptedRoomKey")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("KeyEncryptionIv")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -130,40 +124,6 @@ namespace ChatApp.Data.Migrations
                     b.HasIndex("ChatRoomId");
 
                     b.ToTable("ChatRoomMembers");
-                });
-
-            modelBuilder.Entity("ChatApp.Models.Message", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ChatRoomId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Iv")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SenderId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SenderName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("SentAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChatRoomId");
-
-                    b.ToTable("Messages");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
@@ -309,17 +269,6 @@ namespace ChatApp.Data.Migrations
                     b.Navigation("ChatRoom");
                 });
 
-            modelBuilder.Entity("ChatApp.Models.Message", b =>
-                {
-                    b.HasOne("ChatApp.Models.ChatRoom", "ChatRoom")
-                        .WithMany("Messages")
-                        .HasForeignKey("ChatRoomId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ChatRoom");
-                });
-
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -374,8 +323,6 @@ namespace ChatApp.Data.Migrations
             modelBuilder.Entity("ChatApp.Models.ChatRoom", b =>
                 {
                     b.Navigation("Members");
-
-                    b.Navigation("Messages");
                 });
 #pragma warning restore 612, 618
         }
