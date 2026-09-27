@@ -33,10 +33,9 @@
 .rooms-panel {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: start;
     width: 100%;
     max-width: 480px;
-    gap: 0.8rem;
 }
 
     .rooms-panel h5,
@@ -75,6 +74,13 @@
         text-align: left;
     }
 
+    .rooms-panel > div {
+        margin-bottom: 2rem;
+    }
+    .rooms-panel > div:last-child {
+        margin-bottom: 0;
+    }
+
 .rooms-wrapper {
     display: flex;
     justify-content: center;
@@ -86,6 +92,7 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: center;
+    margin-bottom: 1rem;
 }
 
 .room-badge {

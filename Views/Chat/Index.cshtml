@@ -9,30 +9,37 @@
 
 <div class="rooms-wrapper">
     <div class="rooms-panel">
-        <h5>Dina rum</h5>
-        <div id="myRoomsList" class="rooms-badges">
-            @foreach (var room in Model)
-            {
-                <span class="room-badge" data-room-name="@room.Name">@room.Name</span>
-            }
+		<div>
+            <h5 class="mb-3">Tillgängliga rum</h5>
+		    <div>
+                <div id="myRoomsList" class="rooms-badges">
+                    @foreach (var room in Model)
+                    {
+                        <span class="room-badge" data-room-name="@room.Name">@room.Name</span>
+                    }
+                </div>
+
+                <h5 class="mb-3 mt-4">Skapa nytt rum</h5>
+                <form id="createRoomForm">
+                    <input id="newRoomName" type="text" placeholder="Nytt rumsnamn" maxlength="50" />
+                    <button type="submit" class="btn-primary">Skapa rum</button>
+                </form>
+            </div>
         </div>
-
-        <form id="createRoomForm">
-            <input id="newRoomName" type="text" placeholder="Nytt rumsnamn" maxlength="50" />
-            <button type="submit" class="btn-primary">Skapa rum</button>
-        </form>
-
-        <form id="addMemberForm">
-            <select id="addMemberRoomId">
-                <option value="" disabled selected>Välj rum</option>
-                @foreach (var room in (List<ChatApp.Models.ChatRoom>)ViewBag.OwnedRooms)
-                {
-                    <option value="@room.Id">@room.Name</option>
-                }
-            </select>
-            <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
-            <button type="submit" class="btn-primary">Lägg till medlem</button>
-        </form>
+        <div>
+			<h5 class="mb-3">Hantera medlemmar</h5>
+            <form id="addMemberForm">
+                <select id="addMemberRoomId">
+                    <option value="" disabled selected>Välj rum</option>
+                    @foreach (var room in (List<ChatApp.Models.ChatRoom>)ViewBag.OwnedRooms)
+                    {
+                        <option value="@room.Id">@room.Name</option>
+                    }
+                </select>
+                <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
+                <button type="submit" class="btn-primary">Lägg till medlem</button>
+            </form>
+        </div>
 
     </div>
 </div>
