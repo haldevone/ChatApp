@@ -45,6 +45,10 @@ namespace ChatApp.Controllers
                 .Select(m => m.ChatRoom)
                 .ToListAsync();
 
+            var myOwnedRooms = myRooms.Where(r => r.OwnerId == userId).ToList();
+
+            ViewBag.OwnedRooms = myOwnedRooms;
+
             return View(myRooms);
         }
 

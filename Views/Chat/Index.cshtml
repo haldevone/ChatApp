@@ -23,10 +23,17 @@
         </form>
 
         <form id="addMemberForm">
-            <input id="addMemberRoomId" type="number" placeholder="Rum-ID" />
+            <select id="addMemberRoomId">
+                <option value="" disabled selected>Välj rum</option>
+                @foreach (var room in (List<ChatApp.Models.ChatRoom>)ViewBag.OwnedRooms)
+                {
+                    <option value="@room.Id">@room.Name</option>
+                }
+            </select>
             <input id="addMemberUserName" type="text" placeholder="Användarnamn att bjuda in" />
             <button type="submit" class="btn-primary">Lägg till medlem</button>
         </form>
+
     </div>
 </div>
 
@@ -45,11 +52,11 @@
 
         <div class="active-group-box" id="activeGroupBox" style="display:none;">
             <span class="active-group-name" id="activeGroupName"></span>
-            <button id="leaveGroupBtn" class="btn-leave">Lämna grupp</button>
+            <button id="leaveGroupBtn" class="btn-leave">Lämna Rum</button>
         </div>
 
         <div id="messagesBox" class="messages-box">
-            <div class="empty-state">Anslut till en grupp för att börja chatta</div>
+            <div class="empty-state">Anslut till ett rum för att börja chatta</div>
         </div>
 
         <div id="typingIndicator" class="typing-indicator"></div>

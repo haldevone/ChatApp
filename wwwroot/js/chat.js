@@ -93,6 +93,10 @@ messageInput.addEventListener("input", () => {
     connection.invoke("NotifyTyping", currentGroup).catch(err => console.error(err));
 });
 
+messageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendMessage();
+});
+
 const roomKeyDbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open("ChatAppRoomKeys", 1);
     req.onupgradeneeded = () => req.result.createObjectStore("roomKeys");
@@ -239,7 +243,7 @@ connection.on("JoinApproved", async (groupName, roomId) => {
     groupPanel.style.display = "none";
     activeGroupBox.style.display = "flex";
 
-    activeGroupName.textContent = "Du är i grupp: ";
+    activeGroupName.textContent = "Du är i rum: ";
     const boldName = document.createElement("span");
     boldName.style.fontWeight = "700";
     boldName.style.textTransform = "uppercase";
@@ -251,19 +255,15 @@ connection.on("JoinApproved", async (groupName, roomId) => {
     groupInput.value = "";
 
     currentRoomKey = await loadRoomKeyLocally(roomId);
-    console.log("Lokal nyckel:", currentRoomKey);
 
     if (!currentRoomKey) {
         const response = await fetch(`/Chat/GetMyEncryptedRoomKey?roomId=${roomId}`);
-        console.log("GetMyEncryptedRoomKey status:", response.status);
         if (!response.ok) {
             alert("Kunde inte hämta rumsnyckel.");
             return;
         }
         const { encryptedKey, iv, ownerPublicKey } = await response.json();
-        console.log("Fick från servern:", { encryptedKey, iv, ownerPublicKey });
 
-        // ... resten oförändrat, men lägg en catch runt dekrypteringen:
         try {
             const ownerKey = await crypto.subtle.importKey(
                 "jwk", JSON.parse(ownerPublicKey), { name: "ECDH", namedCurve: "P-256" }, true, []
@@ -283,7 +283,6 @@ connection.on("JoinApproved", async (groupName, roomId) => {
                 "raw", rawRoomKey, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]
             );
             await saveRoomKeyLocally(roomId, currentRoomKey);
-            console.log("Dekryptering lyckades, nyckel satt");
         } catch (err) {
             console.error("Dekryptering av rumsnyckel misslyckades:", err);
         }
@@ -308,12 +307,7 @@ leaveGroupBtn.addEventListener("click", async () => {
     switchGroup(null);
 });
 
-// sendBtn.addEventListener("click", sendMessage);
-    
-// messageInput.addEventListener("keydown", (e) => {
 
-//     if (e.key === "Enter") sendMessage();
-// });
 sendBtn.addEventListener("click", () => {
     sendMessage();
 });
@@ -330,13 +324,8 @@ async function sendMessage() {
         { name: "AES-GCM", iv }, currentRoomKey, encoded
     );
 
-    console.log("ciphertext:", ciphertext, "byteLength:", ciphertext.byteLength);
-    console.log("iv:", iv, "length:", iv.length);
     const ciphertextB64 = arrayBufferToBase64(ciphertext);
     const ivB64 = arrayBufferToBase64(iv);
-
-    console.log("ciphertextB64:", ciphertextB64);
-    console.log("ivB64:", ivB64);
 
     await connection.invoke(
         "SendMessageToGroup",
