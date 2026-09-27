@@ -32,9 +32,14 @@ public class ChatHub : Hub
             return;
         }
 
+        // Skiftlägesokänslig matchning: SQLite gör exakt strängjämförelse som standard,
+        // så "Test" och "test" skulle annars räknas som olika rum.
         var room = await _db.ChatRooms
             .FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
 
+        // Behörighetskontroll sker alltid server-side, aldrig bara i klienten -
+        // klienten kan inte lita på att bara visa/dölja UI-element som skydd.
+        // Kontrollera om användaren är medlem i rummet.
         bool isMember = room != null && await _db.ChatRoomMembers
             .AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
 
@@ -46,12 +51,17 @@ public class ChatHub : Hub
             return;
         }
 
-        _logger.LogInformation("{UserId} gick med i grupp {GroupName}", userId, room.Name);
-
+        // SignalR-gruppnamnet normaliseras till lowercase konsekvent i alla metoder
+        // (JoinGroup, LeaveGroup, SendMessageToGroup, NotifyTyping) - annars hamnar
+        // användare i olika SignalR-grupper trots att de pekar på samma databas-rum.
         await Groups.AddToGroupAsync(Context.ConnectionId, room.Name.ToLower());
+
+        _logger.LogInformation("{UserId} gick med i grupp {GroupName}", userId, room.Name);
 
         await Clients.Caller.SendAsync("JoinApproved", room.Name, room.Id);
 
+        // Historik skickas ur databasen krypterad - klienten dekrypterar själv
+        // med rummets AES-nyckel, servern har aldrig sett klartexten.
         var history = await _db.Messages
             .Where(m => m.ChatRoomId == room.Id)
             .OrderByDescending(m => m.SentAtUtc)
@@ -76,11 +86,12 @@ public class ChatHub : Hub
 
     public async Task SendMessageToGroup(string groupName, string encryptedText, string iv)
     {
+        // Meddelandet är redan AES-GCM-krypterat av klienten innan det når hit -
+        // servern lagrar och vidarebefordrar bara krypterad data, ser aldrig klartext.
         _logger.LogInformation("SendMessageToGroup anropad: {GroupName}", groupName);
 
         if (string.IsNullOrWhiteSpace(encryptedText) || encryptedText.Length > 2000)
         {
-            _logger.LogWarning("Ogiltigt meddelande skickat till grupp {GroupName}", groupName);
             return;
         }
 
@@ -91,14 +102,15 @@ public class ChatHub : Hub
         var room = await _db.ChatRooms.FirstOrDefaultAsync(r => r.Name.ToLower() == groupName.ToLower());
         if (room == null)
         {
-            _logger.LogWarning("Rum hittades inte: {GroupName}", groupName);
             return;
         }
 
+        // Dubbel behörighetskontroll: klienten har redan gått igenom JoinGroup,
+        // men vi litar inte på det - varje skrivning verifieras oberoende.
         bool isMember = await _db.ChatRoomMembers.AnyAsync(m => m.ChatRoomId == room.Id && m.UserId == userId);
+
         if (!isMember)
         {
-            _logger.LogWarning("Användare {UserId} är inte medlem i {GroupName}", userId, groupName);
             return;
         }
 

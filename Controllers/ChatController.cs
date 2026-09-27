@@ -89,6 +89,8 @@ namespace ChatApp.Controllers
 
             var room = await _db.ChatRooms.FindAsync(roomId);
 
+            // Endast rummets ägare får bjuda in medlemmar - avgörande för att
+            // "privata rum" faktiskt ska vara privata och inte öppna för alla.
             if (room == null || room.OwnerId != userId)
                 return StatusCode(403, "Du äger inte det här rummet.");
 
@@ -138,6 +140,8 @@ namespace ChatApp.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveEncryptedRoomKey(int roomId, string targetUserId, string encryptedKey, string iv)
         {
+            // Bara ägaren får distribuera rumsnyckeln - förhindrar att någon
+            // annan skriver över en medlems krypterade nyckelkopia med skräpdata.
             var userId = _userManager.GetUserId(User);
             var room = await _db.ChatRooms.FindAsync(roomId);
             if (room == null || room.OwnerId != userId) return Forbid();

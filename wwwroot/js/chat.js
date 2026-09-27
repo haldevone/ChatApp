@@ -34,6 +34,11 @@ const keyDbPromise = new Promise((resolve, reject) => {
 
 let typingTimeout = null;
 
+
+// Privata ECDH-nycklar lämnar aldrig webbläsaren - sparas bara lokalt i
+// IndexedDB, skickas aldrig till servern. Bara den publika halvan av
+// nyckelparet laddas upp, vilket är säkert eftersom publika nycklar per
+// definition är avsedda att vara öppna.
 async function getOrCreateKeyPair() {
     const db = await keyDbPromise;
     const tx = db.transaction("keys", "readonly");
@@ -145,7 +150,10 @@ function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
     }
 
     const textEl = document.createElement("div");
-        
+
+    // textContent (inte innerHTML) används genomgående för att rendera
+    // meddelandetext, avsändarnamn och gruppnamn - förhindrar XSS genom att
+    // all inskickad text alltid tolkas som text, aldrig som körbar HTML/JS.
     textEl.textContent = text;
     wrapper.appendChild(textEl);
 
@@ -323,6 +331,8 @@ async function sendMessage() {
 
     if (!text || !currentGroup || !currentRoomKey) return;
 
+    // Meddelandet krypteras client-side med rummets AES-GCM-nyckel innan
+    // det någonsin skickas till servern - end-to-end-kryptering.
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encoded = new TextEncoder().encode(text);
     const ciphertext = await crypto.subtle.encrypt(
