@@ -4,10 +4,6 @@ En chattapplikation byggd med ASP.NET Core MVC, SignalR och Identity, med fokus 
 säkerhet: privata chattrum med behörighetskontroll, meddelandekryptering
 (AES-GCM + ECDH-nyckelutbyte), lösenordshashning och JWT.
 
-## Förutsättningar
-
-- .NET 10 SDK
-- Ett verktyg för att köra EF Core-migrationer: `dotnet tool install --global dotnet-ef`
 
 ## Köra projektet lokalt
 
@@ -23,13 +19,11 @@ säkerhet: privata chattrum med behörighetskontroll, meddelandekryptering
 	dotnet user-secrets init
 	dotnet user-secrets set "Jwt:Key" "<valfri egen sträng, minst 32 tecken>"
 	cd ..
-
    
 4. Skapa databasen (SQLite, skapas automatiskt som en fil i projektmappen):
 	cd ChatApp
 	dotnet ef database update
 	cd ..
-
 	
 5. Starta appen:
 	cd ChatApp
@@ -56,7 +50,7 @@ dotnet test
 
 - **TLS**: appen körs över HTTPS (self-signed dev-certifikat). Skyddar
   transporten mellan klient och server mot avlyssning/manipulation, men
-  skyddar inte mot XSS eller en komprometterad server.
+  skyddar inte mot XSS.
 - **Lösenord**: hashas av ASP.NET Core Identity (PBKDF2), aldrig lagrade i
   klartext.
 - **Meddelandekryptering**: varje chattrum har en egen AES-GCM-nyckel.
