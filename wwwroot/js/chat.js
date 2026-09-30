@@ -1,6 +1,4 @@
-﻿    
-
-const connection = new signalR.HubConnectionBuilder()
+﻿const connection = new signalR.HubConnectionBuilder()
     .withUrl("/chatHub")
     .withAutomaticReconnect()
     .build();
@@ -8,6 +6,7 @@ const connection = new signalR.HubConnectionBuilder()
 let currentGroup = null;
 let currentRoomId = null;
 let currentRoomKey = null;
+let myPrivateKey = null;
 
 const groupPanel = document.getElementById("groupPanel");
 const activeGroupBox = document.getElementById("activeGroupBox");
@@ -25,69 +24,8 @@ const membersPanel = document.getElementById("membersPanel");
 const membersList = document.getElementById("membersList");
 const typingIndicator = document.getElementById("typingIndicator");
 
-const keyDbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open("ChatAppKeys", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("keys");
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-});
-
 let typingTimeout = null;
-
-
-// Privata ECDH-nycklar lämnar aldrig webbläsaren - sparas bara lokalt i
-// IndexedDB, skickas aldrig till servern. Bara den publika halvan av
-// nyckelparet laddas upp, vilket är säkert eftersom publika nycklar per
-// definition är avsedda att vara öppna.
-async function getOrCreateKeyPair() {
-    const db = await keyDbPromise;
-    const tx = db.transaction("keys", "readonly");
-    const existingPrivate = await new Promise(res => {
-        const req = tx.objectStore("keys").get("ecdhPrivateKey");
-        req.onsuccess = () => res(req.result);
-    });
-    const existingPublic = await new Promise(res => {
-        const req = tx.objectStore("keys").get("ecdhPublicKey");
-        req.onsuccess = () => res(req.result);
-    });
-
-    if (existingPrivate && existingPublic) {
-        const privateKey = await crypto.subtle.importKey(
-            "jwk", existingPrivate, { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
-        );
-        return { privateKey, publicJwk: existingPublic, isNew: false };
-    }
-
-    const keyPair = await crypto.subtle.generateKey(
-        { name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]
-    );
-    const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
-    const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
-
-    const writeTx = db.transaction("keys", "readwrite");
-    writeTx.objectStore("keys").put(privateJwk, "ecdhPrivateKey");
-    writeTx.objectStore("keys").put(publicJwk, "ecdhPublicKey");
-
-    return { privateKey: keyPair.privateKey, publicJwk, isNew: true };
-}
-
-
-async function ensureKeysRegistered() {
-    const result = await getOrCreateKeyPair();
-
-    const checkResponse = await fetch(`/Chat/GetPublicKey?userName=${encodeURIComponent(currentUserName)}`);
-    if (!checkResponse.ok) {
-        // Servern saknar vår publika nyckel (t.ex. efter databas-rensning) — ladda upp igen
-        await fetch("/Chat/SavePublicKey", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `publicKeyJwk=${encodeURIComponent(JSON.stringify(result.publicJwk))}&__RequestVerificationToken=${encodeURIComponent(antiForgeryToken)}`
-        });
-    }
-
-    return result.privateKey;
-}
-
+let hideTypingTimer = null;
 
 messageInput.addEventListener("input", () => {
     if (!currentGroup) return;
@@ -98,45 +36,13 @@ messageInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendMessage();
 });
 
-const roomKeyDbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open("ChatAppRoomKeys", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("roomKeys");
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-});
-
-async function saveRoomKeyLocally(roomId, aesKey) {
-    const jwk = await crypto.subtle.exportKey("jwk", aesKey);
-    const db = await roomKeyDbPromise;
-    const tx = db.transaction("roomKeys", "readwrite");
-    tx.objectStore("roomKeys").put(jwk, roomId);
-}
-
-async function loadRoomKeyLocally(roomId) {
-    const db = await roomKeyDbPromise;
-    const tx = db.transaction("roomKeys", "readonly");
-    const jwk = await new Promise(res => {
-        const req = tx.objectStore("roomKeys").get(roomId);
-        req.onsuccess = () => res(req.result);
-    });
-    if (!jwk) return null;
-
-    return crypto.subtle.importKey(
-        "jwk", jwk, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]
-    );
-}
-
-let hideTypingTimer = null;
-
 function setConnectedUi(isConnected) {
     statusBadge.textContent = isConnected ? "Ansluten" : "Frånkopplad";
     statusBadge.className = "status-badge " + (isConnected ? "status-connected" : "status-disconnected");
 }
 
 function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
-        
     const empty = messagesBox.querySelector(".empty-state");
-        
     if (empty) empty.remove();
 
     const wrapper = document.createElement("div");
@@ -160,7 +66,7 @@ function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
     if (!isSystem) {
         const timeEl = document.createElement("div");
         timeEl.className = "message-time";
-		const time = sentAt ? new Date(sentAt) : new Date();
+        const time = sentAt ? new Date(sentAt) : new Date();
         timeEl.textContent = time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         wrapper.appendChild(timeEl);
     }
@@ -168,7 +74,6 @@ function addMessage({ sender, text, isOwn, isSystem, sentAt }) {
     messagesBox.appendChild(wrapper);
     messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-
 
 async function switchGroup(newGroupName) {
     if (newGroupName === currentGroup) return;
@@ -184,19 +89,6 @@ async function switchGroup(newGroupName) {
 
     if (newGroupName) {
         await connection.invoke("JoinGroup", newGroupName);
-    }
-}
-
-async function decryptMessage(encryptedText, iv) {
-    try {
-        const decrypted = await crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: base64ToArrayBuffer(iv) },
-            currentRoomKey,
-            base64ToArrayBuffer(encryptedText)
-        );
-        return new TextDecoder().decode(decrypted);
-    } catch {
-        return "[Kunde inte dekryptera meddelandet]";
     }
 }
 
@@ -216,12 +108,12 @@ connection.on("UserLeft", (userName) => {
 });
 
 connection.on("UserTyping", (userName) => {
-	typingIndicator.textContent = `${userName} skriver...`;
-	clearTimeout(hideTypingTimer);
-        
-	hideTypingTimer = setTimeout(() => {
-		typingIndicator.textContent = "";
-	}, 2000);
+    typingIndicator.textContent = `${userName} skriver...`;
+    clearTimeout(hideTypingTimer);
+
+    hideTypingTimer = setTimeout(() => {
+        typingIndicator.textContent = "";
+    }, 2000);
 });
 
 connection.on("AddedToRoom", (roomId, roomName) => {
@@ -302,16 +194,9 @@ connection.on("JoinApproved", async (groupName, roomId) => {
     }
 });
 
-connection.on("JoinDenied", (groupName) => {
-    alert(`Du har inte behörighet till rummet "${groupName}".`);
-});
-
-
 joinBtn.addEventListener("click", async () => {
-
     const groupName = groupInput.value.trim();
     if (!groupName) return;
-
     switchGroup(groupName);
 });
 
@@ -320,15 +205,12 @@ leaveGroupBtn.addEventListener("click", async () => {
     switchGroup(null);
 });
 
-
 sendBtn.addEventListener("click", () => {
     sendMessage();
 });
 
 async function sendMessage() {
-
     const text = messageInput.value.trim();
-
     if (!text || !currentGroup || !currentRoomKey) return;
 
     // Meddelandet krypteras client-side med rummets AES-GCM-nyckel innan
@@ -339,9 +221,6 @@ async function sendMessage() {
         { name: "AES-GCM", iv }, currentRoomKey, encoded
     );
 
-    const ciphertextB64 = arrayBufferToBase64(ciphertext);
-    const ivB64 = arrayBufferToBase64(iv);
-
     await connection.invoke(
         "SendMessageToGroup",
         currentGroup,
@@ -350,7 +229,6 @@ async function sendMessage() {
     );
     messageInput.value = "";
 }
-
 
 document.getElementById("addMemberForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -372,7 +250,6 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
     const addResult = await addResponse.json();
     const targetUserId = addResult.userId;
 
-    // Hämta nya medlemmens publika ECDH-nyckel
     const keyResponse = await fetch(`/Chat/GetPublicKey?userName=${encodeURIComponent(userName)}`);
     if (!keyResponse.ok) {
         alert("Medlem tillagd, men saknar publik nyckel (har inte loggat in i chatten än).");
@@ -383,7 +260,6 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
         "jwk", JSON.parse(publicKey), { name: "ECDH", namedCurve: "P-256" }, true, []
     );
 
-    // Härled delad hemlighet: min privata + deras publika
     const sharedSecret = await crypto.subtle.deriveKey(
         { name: "ECDH", public: memberPublicKey },
         myPrivateKey,
@@ -391,7 +267,6 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
         false, ["encrypt", "decrypt"]
     );
 
-    // Kryptera rumsnyckeln med den delade hemligheten
     const roomAesKey = await loadRoomKeyLocally(roomId);
     const rawRoomKey = await crypto.subtle.exportKey("raw", roomAesKey);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -399,7 +274,6 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
         { name: "AES-GCM", iv }, sharedSecret, rawRoomKey
     );
 
-    // Behöver mottagarens userId, inte bara username — hämta via AddMember-svaret istället
     await fetch("/Chat/SaveEncryptedRoomKey", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -408,19 +282,6 @@ document.getElementById("addMemberForm").addEventListener("submit", async (e) =>
 
     alert("Medlem tillagd och nyckel distribuerad!");
 });
-
-function arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary);
-}
-function base64ToArrayBuffer(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes.buffer;
-}
 
 document.querySelectorAll(".room-badge").forEach(badge => {
     badge.addEventListener("click", async () => {
@@ -453,8 +314,6 @@ document.getElementById("createRoomForm").addEventListener("submit", async (e) =
 
     location.reload();
 });
-
-let myPrivateKey = null;
 
 async function initializeApp() {
     myPrivateKey = await ensureKeysRegistered();
