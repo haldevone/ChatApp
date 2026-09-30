@@ -24,7 +24,7 @@ public class ChatHub : Hub
     }
     public async Task JoinGroup(string groupName)
     {
-        var userId = _userManager.GetUserId(Context.User);
+        var userId = _userManager.GetUserId(Context.User!);
         
         if (userId == null)
         {
