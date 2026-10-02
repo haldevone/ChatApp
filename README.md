@@ -1,75 +1,38 @@
-# ChatApp – Säker realtidschat med SignalR
-
-En chattapplikation byggd med ASP.NET Core MVC, SignalR och Identity, med fokus på
-säkerhet: privata chattrum med behörighetskontroll, meddelandekryptering
-(AES-GCM + ECDH-nyckelutbyte), lösenordshashning och JWT.
-
+# ChatApp med SignalR
+ChatApp med säkerhet i fokus, byggd med ASP.NET Core MVC, SignalR och Identity. Använder sig av privata chatrum med behörighetskontroll, meddelande kryptering, lösenordhashing och JWT.
 
 ## Köra projektet lokalt
+1.	Klona repot
+2.	Sätt en hemlig nyckel för JWT. Nycklen lagras lokalt på datorn 
+dotnet user-secrets init 
+dotnet user-secrets set "Jwt:Key" "<valfri egen sträng, minst 32 tecken>" 
+3.	Updatera databasen (SQlite, skapas automatiskt) dotnet ef database update
+4.	Projektet körs via https://localhost:7266/
+5.	Registrera Konto, Logga in
 
-1. Klona repot och stå i mappen där `.sln`-filen ligger.
+## Skapa privat krypterad chat
 
-2. Återställ paket: 
-   dotnet restore
+För att chatta flera användare använd separata webbläsare per användare för att undvika  dubbletter av senast inloggad användare i samma webbläsare.
+1.	Skapa nytt rum (du står som rummets ägare)
+2.	Bjud in användare via deras epost (användarnamn)
+3.	Rummet dyker upp hos användare och kan nu ansluta till chatten
 
-3. Sätt en hemlig nyckel för JWT-signering (krävs för att appen ska starta).
-   Nyckeln lagras bara lokalt på din dator, aldrig i koden eller i Git:
-   
-	cd ChatApp
-	dotnet user-secrets init
-	dotnet user-secrets set "Jwt:Key" "<valfri egen sträng, minst 32 tecken>"
-	cd ..
-   
-4. Skapa databasen (SQLite, skapas automatiskt som en fil i projektmappen):
-	cd ChatApp
-	dotnet ef database update
-	cd ..
-	
-5. Starta appen:
-	cd ChatApp
-	dotnet run
-
-	
-6. Öppna webbläsaren på adressen som visas i terminalen (https://localhost:7266/).
-   Registrera ett konto, logga in, och öppna chattsidan.
-
-## Testa med flera användare samtidigt
-
-Webbläsare delar cookies och lokal lagring mellan flikar/fönster av samma
-webbläsare. För att testa flera inloggade användare samtidigt, använd
-separata webbläsare eller separata webbläsarprofiler (t.ex. Chrome + Edge +
-Firefox, eller flera Chrome-profiler) – annars loggas alla fönster in som
-samma senast inloggade användare.
-
-## Köra enhetstester
-
+## Köra Enhetstester
 dotnet test
 
-
 ## Säkerhetsöversikt
-
-- **TLS**: appen körs över HTTPS (self-signed dev-certifikat). Skyddar
-  transporten mellan klient och server mot avlyssning/manipulation, men
-  skyddar inte mot XSS.
-- **Lösenord**: hashas av ASP.NET Core Identity (PBKDF2), aldrig lagrade i
-  klartext.
-- **Meddelandekryptering**: varje chattrum har en egen AES-GCM-nyckel.
-  Nyckeln distribueras till medlemmar via ett ECDH-nyckelutbyte mellan
-  rummets ägare och varje inbjuden medlem. Servern lagrar bara krypterad
-  text och krypterade nyckelkopior – aldrig klartext eller privata nycklar.
-- **Behörighet**: servern kontrollerar medlemskap innan någon släpps in i
-  ett rum eller får skicka meddelanden dit, oavsett vad klienten skickar.
-- **JWT**: genereras vid inloggning, signerad med en hemlig nyckel som
-  aldrig hårdkodas (se steg 3 ovan).
+TLS – projektet körs över HTTPS och skyddar transporten mellan klient och server, mot avlysning/manipulation
+Lösenord – Hashas via Identity använder sig av (PBKDF2)
+Behörighetskontroll – Servern kontrollerar ifall användare är medlem för att bevilja behörighet till rummet/meddelanden.
+Meddelandekryptering - Varje chattrum har en egen AES-GCM nickel, distruberat till medlemmarna via EDCH nyckelutbyte, servern lagrar endast krypterade kopior.
+JWT – Genereras vid inlogg och signeras med hemlig nyckel
 
 ## Kända begränsningar
+-	Eftersom del av nyckellagringen sker lokalt så kan vid rensad webbläsare och ny enhet, de tidigare meddelanden ej dekrypteras av den användaren. Användaren måste då bli inbjuden på nytt.
+-	Samma orsak som ovan, rummets ägare blir av med rummet, inga privata nycklar sparas i servern.
 
-- Om en användares lokala nyckellagring (webbläsarens IndexedDB) förloras
-  (t.ex. rensad webbläsardata, ny enhet), kan tidigare krypterade
-  meddelanden i det rummet inte längre dekrypteras av den användaren utan
-  att bli ombjuden till rummet på nytt.
-- Ingen Content-Security-Policy eller Subresource Integrity är
-  implementerad.
-- Rummets ägare har ingen serverlagrad nyckelkopia av sig själv och kan
-  därför inte återfå åtkomst från en ny enhet utan sin ursprungliga
-  privata nyckel.
+## Sammarbete med AI
+AI har använts för vägledning och förklaring av ECDH AES flödet samt som bollplank av projektet i helhet. Kodgeneration av de mer avancerade tekniska delarna js kryptologik och en del av css.
+
+
+
